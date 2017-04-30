@@ -1,14 +1,17 @@
 package client;
 
+import org.apache.commons.io.FileUtils;
+import util.Helper;
 import util.PropertyReader;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
 
 /**
  * Created by bk on 11/04/2017.
@@ -28,33 +31,34 @@ public class TcpClientSocket {
             System.out.println("Connecting to server on port " + serverPort);
 
             Socket socket = new Socket(host, serverPort);
-            //Socket socket = new Socket("127.0.0.1", serverPort);
             System.out.println("Just connected to " + socket.getRemoteSocketAddress());
-            PrintWriter toServer =
-                    new PrintWriter(socket.getOutputStream(),true);
-            InputStream inputStream = socket.getInputStream();
-            BufferedReader fromServer =
-                    new BufferedReader(
-                            new InputStreamReader(inputStream));
-            toServer.println("Hello from " + socket.getLocalSocketAddress());
-            String line = fromServer.readLine();
-            System.out.println("Client received: " + line + " from Server");
 
-            byte[] sizeAr = new byte[4];
-            inputStream.read(sizeAr);
-            int size = ByteBuffer.wrap(sizeAr).asIntBuffer().get();
+            InputStream in = socket.getInputStream();
+            DataInputStream dis = new DataInputStream(in);
 
-            byte[] imageAr = new byte[size];
-            inputStream.read(imageAr);
+            List<byte[]> bytesReadList = readBytes(dis);
+            InputStream inputStreamForImage = null;
 
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(imageAr));
+            int counterForImageName = 0;
+            for (byte[] byteRead : bytesReadList) {
+                System.out.println("read byte array length :" +byteRead.length);
+                inputStreamForImage = new ByteArrayInputStream(byteRead);
+                String pathStr = "./output/convertedPic"+ counterForImageName +".png";
 
-            System.out.println("Received " + image.getHeight() + "x" + image.getWidth() + ": " + System.currentTimeMillis());
-            ImageIO.write(image, "jpg", new File("./resource/exWrite.jpg"));
+                File fileDirectory = new File("./output");
+                if (!fileDirectory.exists()) {
+                    FileUtils.forceMkdir(fileDirectory);
+                }
 
+                Path path = Paths.get(pathStr);
+                Files.write(path, byteRead);
 
-            toServer.close();
-            fromServer.close();
+                counterForImageName++;
+            }
+
+            inputStreamForImage.close();
+            dis.close();
+            in.close();
             socket.close();
         }
         catch(UnknownHostException ex) {
@@ -68,6 +72,51 @@ public class TcpClientSocket {
     public static void main(String[] args) {
         TcpClientSocket tcpClientSocket = new TcpClientSocket();
         tcpClientSocket.run();
+    }
+
+    public List<byte[]> readBytes(DataInputStream dataInputStream) throws IOException {
+
+        Map<Byte, List<byte[]>> mapOfBytesList = new HashMap<>();
+
+        List<byte[]> bytesList = new ArrayList<>();
+
+        int totalOfPackages = dataInputStream.readInt();
+        System.out.println("total :"+ totalOfPackages);
+
+        while (totalOfPackages > 0) {
+            int len = dataInputStream.readInt();
+            System.out.println("length of byte arr :" +len);
+            byte[] data = new byte[len];
+            if (len > 0) {
+                dataInputStream.readFully(data);
+            }
+            System.out.println("read first element :" + data[0]);
+            byte[] byteArr = Arrays.copyOfRange(data, 1, data.length);
+            if (mapOfBytesList.containsKey(data[0])) {
+                mapOfBytesList.get(data[0]).add(byteArr);
+            } else {
+                bytesList.add(byteArr);
+                mapOfBytesList.put(data[0], bytesList);
+                bytesList = new ArrayList<>();
+            }
+            totalOfPackages --;
+        }
+
+
+        return generateListFromMap(mapOfBytesList);
+
+    }
+
+
+    public List<byte[]> generateListFromMap(Map<Byte, List<byte[]>> mapOfBytesList) {
+        List<byte[]> generatedList = new ArrayList<>();
+
+        for ( Byte byteKey : mapOfBytesList.keySet()) {
+            List<byte[]> listByte = mapOfBytesList.get(byteKey);
+            generatedList.add(Helper.convertListToByteArr(listByte));
+        }
+
+        return generatedList;
     }
 
 }
